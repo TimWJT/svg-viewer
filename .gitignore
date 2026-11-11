@@ -1,0 +1,6 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/schemas/
+dist/
+# Single-file standalone download, built by build.mjs. Not shipped in the app.
+/dist-standalone/

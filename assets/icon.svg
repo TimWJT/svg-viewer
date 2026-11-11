@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#d97706"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Bezier curve + anchor handles mark -->
+  <path fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round"
+        d="M128 364 C 128 196, 384 316, 384 148"/>
+  <line x1="128" y1="364" x2="128" y2="220" stroke="#fff" stroke-width="18" stroke-linecap="round" opacity="0.75"/>
+  <line x1="384" y1="148" x2="384" y2="292" stroke="#fff" stroke-width="18" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="128" cy="212" r="24" fill="#fff"/>
+  <circle cx="384" cy="300" r="24" fill="#fff"/>
+  <rect x="98" y="334" width="60" height="60" rx="12" fill="#fff"/>
+  <rect x="354" y="118" width="60" height="60" rx="12" fill="#fff"/>
+</svg>

@@ -1,0 +1,41 @@
+[package]
+name = "svg-viewer"
+version = "1.0.0"
+description = "An SVG viewer that gets out of the way"
+authors = ["Tim"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# No "protocol-asset": main.rs serves the `asset` scheme itself, so a network
+# path is refused before the filesystem is touched.
+tauri = { version = "2", features = [] }
+# Already in the tree via tauri; used to decode asset:// request paths.
+percent-encoding = "2"
+# generate_context! embeds the plugins block from tauri.conf.json as JSON, so
+# serde_json has to be a direct dependency of this crate.
+serde_json = "1"
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-process = "2"
+
+# The updater only exists on desktop; mobile targets have no installer to swap.
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+
+# Pinned to whatever Tauri already resolves, so we share its COM types.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_Foundation"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

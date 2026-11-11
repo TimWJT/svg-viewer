@@ -1,0 +1,90 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SVG Viewer",
+  "version": "1.0.0",
+  "identifier": "com.svgviewer.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run build"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost blob:; script-src 'self'; form-action 'none'",
+      "assetProtocol": {
+        "enable": false
+      }
+    },
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "SVG Viewer",
+        "width": 1100,
+        "height": 820,
+        "minWidth": 400,
+        "minHeight": 300,
+        "resizable": true,
+        "center": true,
+        "dragDropEnabled": true
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/TimWJT/svg-viewer/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwQTBGQjg2ODEzNjE1MjQKUldRa0ZUYUJodnVnc015S01XOUl3a0paRkl5NWdDSHRBMVdiMUxKTTZWZVFWSnhhNHJzYmpxSTcK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "shortDescription": "An SVG viewer that gets out of the way",
+    "longDescription": "Opens SVG files, renders them cleanly with checkerboard/light/dark backdrops, and lets you zoom, pan and inspect elements or source. Live-reloads while you edit the file elsewhere.",
+    "category": "Utility",
+    "copyright": "© 2026 Tim Wang",
+    "licenseFile": "../LICENSE",
+    "fileAssociations": [
+      {
+        "ext": [
+          "svg"
+        ],
+        "name": "SVG Image",
+        "description": "Scalable Vector Graphics",
+        "role": "Viewer",
+        "mimeType": "image/svg+xml"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./installer-hooks.nsh",
+        "customLanguageFiles": { "English": "./nsis/English.nsh" },
+        "startMenuFolder": "SVG Viewer"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      }
+    },
+    "publisher": "Tim Wang",
+    "homepage": "https://github.com/TimWJT/svg-viewer"
+  }
+}

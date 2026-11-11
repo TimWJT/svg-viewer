@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions for the viewer windows: the open dialog, window title/focus, spawning a window per document, the drag-drop / open-file events, and the updater.",
+  "windows": [
+    "main",
+    "doc-*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-set-title",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "dialog:allow-open",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
+    "core:webview:allow-print",
+    "window-state:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" width="480" height="320">
+  <title>SVG Viewer Sample</title>
+  <defs>
+    <linearGradient id="card-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="orb-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+
+  <g id="card-backdrop">
+    <rect x="24" y="24" width="432" height="272" rx="24" fill="url(#card-grad)"/>
+    <circle id="sun-orb" cx="372" cy="104" r="46" fill="url(#orb-grad)" opacity="0.92"/>
+  </g>
+
+  <g id="vector-curves" fill="none" stroke="#ffffff" stroke-linecap="round">
+    <path id="primary-wave" stroke-width="6" d="M 64 228 C 144 120, 232 268, 320 148 S 404 180, 416 140"/>
+    <path id="guide-line" stroke-width="2.5" stroke-dasharray="6 8" opacity="0.55" d="M 64 228 L 144 120 M 320 148 L 232 268"/>
+    <rect id="anchor-start" x="54" y="218" width="20" height="20" rx="5" fill="#ffffff"/>
+    <rect id="anchor-mid" x="310" y="138" width="20" height="20" rx="5" fill="#ffffff"/>
+    <circle id="handle-1" cx="144" cy="120" r="7" fill="#fbbf24" stroke="#ffffff" stroke-width="2.5"/>
+    <circle id="handle-2" cx="232" cy="268" r="7" fill="#fbbf24" stroke="#ffffff" stroke-width="2.5"/>
+  </g>
+
+  <g id="caption" fill="#ffffff" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+    <text x="64" y="78" font-size="22" font-weight="700">SVG Viewer</text>
+    <text x="64" y="104" font-size="13" opacity="0.8">Smooth pan &amp; zoom · Live reload · Element tree</text>
+  </g>
+</svg>

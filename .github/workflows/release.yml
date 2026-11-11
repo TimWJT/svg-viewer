@@ -1,0 +1,127 @@
+name: release
+
+# Tag a commit to cut a release:
+#   git tag v1.0.0 && git push origin v1.0.0
+# Installers for every platform are built and attached to a DRAFT release,
+# which you review and publish by hand from the Releases page.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  installers:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: npm install
+
+      - name: Generate icons
+        run: npm run icon
+
+      - name: Test
+        run: npm test
+        timeout-minutes: 2
+
+      - uses: tauri-apps/tauri-action@v0
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'SVG Viewer ${{ github.ref_name }}'
+          releaseBody: |
+            ## Which file do I download?
+
+            Pick **one** file from **Assets** below. You can ignore everything else.
+
+            | Your computer | Download the file ending in |
+            |---|---|
+            | **Windows** | **`_x64-setup.exe`** |
+            | **Mac with Apple silicon** (M1, M2, M3, M4…) | **`_aarch64.dmg`** |
+            | **Mac with Intel** | **`_x64.dmg`** |
+            | **Linux** (Ubuntu, Debian, Mint) | **`.deb`** |
+            | **Linux** (any other) | **`.AppImage`** |
+            | **No install** — runs in any browser | **`SVG.Viewer.html`** |
+
+            Not sure which Mac you have? Apple menu → **About This Mac**. "Chip: Apple M…"
+            means Apple silicon; "Processor: Intel" means Intel.
+
+            ### First launch warnings
+
+            The app is free and not code-signed, so your system will warn once:
+
+            - **Windows** — "Windows protected your PC": click **More info**, then **Run anyway**.
+            - **macOS** — right-click the app, choose **Open**, then confirm.
+
+            ### The other files
+
+            `.msi` (Windows) and `.rpm` (Fedora/openSUSE) are alternative installers for
+            people who specifically need them. `.app.tar.gz` and `.sig` files are used by the
+            app's built-in updater; you never need to download them.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  standalone-html:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    needs: installers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Test
+        run: npm test
+        timeout-minutes: 2
+      - run: npm run build
+      - name: Attach the single-file build to the release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: 'dist-standalone/SVG Viewer.html'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

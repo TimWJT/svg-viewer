@@ -1,0 +1,32 @@
+{
+  "name": "svg-viewer",
+  "version": "1.0.0",
+  "description": "An SVG viewer that gets out of the way",
+  "scripts": {
+    "test": "node --test",
+    "build": "node build.mjs",
+    "start": "node build.mjs && node serve.mjs",
+    "serve": "node serve.mjs",
+    "tauri": "tauri",
+    "app:dev": "tauri dev",
+    "app:build": "tauri build",
+    "icons": "node create-icon.mjs"
+  },
+  "keywords": [],
+  "type": "module",
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.11.0",
+    "dompurify": "^3.4.14",
+    "highlight.js": "^11.12.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "esbuild": "^0.28.2"
+  },
+  "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0"
+}
