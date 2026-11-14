@@ -1,6 +1,6 @@
 {
   "name": "svg-viewer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "An SVG viewer that gets out of the way",
   "scripts": {
     "test": "node --test",
