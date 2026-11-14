@@ -66,7 +66,14 @@ const tpl = await readFile(join(here, 'src/index.html'), 'utf8');
 //     CSP, which matters for a program that renders untrusted files.
 //   dist-standalone/SVG Viewer.html -> everything inlined, the standalone
 //     download that works from file:// with no server and no siblings.
+// The standalone file gets no Tauri CSP, so it carries its own: inline code
+// only, and nothing a rendered SVG references can reach the network.
+const STANDALONE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+  "img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'";
+const CHARSET = '<meta charset="utf-8">';
+if (!tpl.includes(CHARSET)) throw new Error('index.html charset meta changed — cannot add the standalone CSP');
 const inlined = tpl
+  .replace(CHARSET, () => `${CHARSET}\n<meta http-equiv="Content-Security-Policy" content="${STANDALONE_CSP}">`)
   .replace('/*__STARTUP__*/', () => inlineStartup)
   .replace('/*__CSS__*/', () => bundleCss)
   .replace('/*__JS__*/', () => inlineJs);

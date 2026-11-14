@@ -1,5 +1,6 @@
 import './startup.js';
 import DOMPurify from 'dompurify';
+import { sanitizeSvg } from './sanitize.js';
 import hljs from 'highlight.js/lib/core';
 import xmlLang from 'highlight.js/lib/languages/xml';
 import cssLang from 'highlight.js/lib/languages/css';
@@ -12,7 +13,7 @@ hljs.registerLanguage('css', cssLang);
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { WebviewWindow, getCurrentWebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { check as checkUpdate } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -613,15 +614,8 @@ const COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 function stripXmlPreamble(text) {
   return String(text || '')
     .replace(/^\uFEFF/, '')
-    .replace(/^\s*(?:<\?xml[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*/i, '');
+    .replace(/^\s*(?:<\?xml[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*|<!DOCTYPE(?:[^>[]|\[[\s\S]*?\])*>\s*)*/i, '');
 }
-
-const SVG_PURIFY = {
-  USE_PROFILES: { svg: true, svgFilters: true, html: true },
-  ADD_TAGS: ['use', 'symbol', 'defs', 'clipPath', 'mask', 'pattern', 'marker', 'linearGradient', 'radialGradient', 'stop', 'textPath', 'tspan', 'title', 'desc', 'switch'],
-  ADD_ATTR: ['target', 'id', 'viewBox', 'preserveAspectRatio', 'xmlns', 'xmlns:xlink', 'xlink:href', 'href'],
-  FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
-};
 
 function joinPath(dir, rel) {
   const sep = dir.includes('\\') ? '\\' : '/';
@@ -638,6 +632,11 @@ function isAbsolutePath(p) {
   return /^([a-zA-Z]:[\\/]|[\\/]{1,2})/.test(p);
 }
 
+function isInsideDir(path, dir) {
+  const norm = (p) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+  return norm(path).startsWith(norm(dir) + '/');
+}
+
 function isNetworkPath(p) {
   return /^[\\/]{2}/.test(p);
 }
@@ -652,7 +651,11 @@ function resolveImages() {
     let rel = raw;
     try { rel = decodeURIComponent(raw); } catch {}
     if (isNetworkPath(rel)) return;
-    const abs = isAbsolutePath(rel) ? rel : joinPath(state.docDir, rel);
+    const root = isAbsolutePath(rel) ? rel.match(/^([a-zA-Z]:[\\/]|[\\/])/)[0] : null;
+    const abs = root ? joinPath(root, rel.slice(root.length)) : joinPath(state.docDir, rel);
+    /* Only images inside the document's own folder; the asset handler in Rust
+       enforces the same rule. */
+    if (!isInsideDir(abs, state.docDir)) { img.removeAttribute(attr); return; }
     try { img.setAttribute(attr, convertFileSrc(abs)); } catch {}
   });
 }
@@ -809,7 +812,7 @@ function render(text) {
   renderRevision++;
   const current = captureRenderGuard();
   const cleanSource = stripXmlPreamble(text);
-  const sanitised = DOMPurify.sanitize(cleanSource, SVG_PURIFY);
+  const sanitised = sanitizeSvg(DOMPurify, cleanSource);
 
   const stage = document.createElement('div');
   stage.className = 'svg-stage';
@@ -830,7 +833,7 @@ function render(text) {
     const code = document.createElement('code');
     code.className = 'language-xml';
     code.textContent = text;
-    try { hljs.highlightElement(code); } catch {}
+    if (sourceOn) highlightSource(code);
     const btn = document.createElement('button');
     btn.className = 'btn copy';
     btn.type = 'button';
@@ -860,7 +863,6 @@ function render(text) {
     const id = existingId && !used.has(existingId)
       ? (used.add(existingId), existingId)
       : slugify(title, used);
-    if (!existingId) el.setAttribute('id', id);
     return { el, id, title, level: elementDepth(el, stage) };
   });
 
@@ -1661,8 +1663,16 @@ function applyGrid(on, announce, save = true) {
 }
 
 let sourceOn = store.get('source', false);
+/* Highlighting a big file is the slowest part of a render, so it waits until
+   source view is actually shown. */
+function highlightSource(code) {
+  if (!code || code.classList.contains('hljs')) return;
+  try { hljs.highlightElement(code); } catch {}
+}
+
 function applySource(on, announce, save = true) {
   sourceOn = !!on;
+  if (sourceOn) highlightSource(els.doc.querySelector('.svg-source code'));
   const place = captureAnchor();
   root.setAttribute('data-source', sourceOn ? 'on' : 'off');
   if (save) store.set('source', sourceOn);
@@ -1850,7 +1860,18 @@ window.addEventListener('drop', async (e) => {
 
 let externalOpenListener = Promise.resolve();
 
+/* Title-bar close / Alt+F4. Rust quits the program when this is the last
+   window (keeping its session for the next launch); otherwise close just this
+   window through the same path as Ctrl+Shift+W. */
+async function nativeCloseRequested(e) {
+  e.preventDefault();
+  let others = 0;
+  try { others = (await getAllWebviewWindows()).filter((w) => w.label !== windowLabel).length; } catch {}
+  if (others > 0) closeWindow();
+}
+
 if (IS_TAURI) {
+  getCurrentWindow().onCloseRequested(nativeCloseRequested).catch(() => {});
   listen('tauri://drag-enter', () => els.drop.classList.add('on'));
   listen('tauri://drag-leave', () => els.drop.classList.remove('on'));
   listen('tauri://drag-drop', (e) => {
@@ -1881,6 +1902,9 @@ $('#btn-open').addEventListener('click', openViaPicker);
 $('#btn-zoom-in').addEventListener('click', () => zoomStep(1));
 $('#btn-zoom-out').addEventListener('click', () => zoomStep(-1));
 els.zoomval.addEventListener('click', () => zoomAnimated(1));
+els.zoomval.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); zoomAnimated(1); }
+});
 $('#btn-outline').addEventListener('click', () => applyOutline(!outlineOn, false));
 $('#btn-theme').addEventListener('click', () => applyTheme(THEMES[(THEMES.indexOf(theme) + 1) % 3], false));
 $('#btn-bg').addEventListener('click', () => applyBackdrop(BACKDROPS[(BACKDROPS.indexOf(bg) + 1) % BACKDROPS.length], false));

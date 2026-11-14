@@ -2,7 +2,7 @@
 
 An SVG **viewer**. Not an illustrator, not a design suite, not a converter. It renders an `.svg` file, lets you zoom up to 3200%, toggles backdrops, inspects elements or XML source, and stays out of the way.
 
-The whole UI is one self-contained HTML file — sanitiser, syntax highlighting and styles all inlined. No network requests, ever. Your files never leave the machine.
+The whole UI is one self-contained HTML file — sanitiser, syntax highlighting and styles all inlined. Your files never leave the machine: an opened SVG cannot load anything from the network (scripts, `foreignObject` and remote references are stripped, and a content security policy backs that up). The only network request is the desktop app's update check on startup, which you can turn off in Settings.
 
 ## Run from source
 
@@ -19,7 +19,7 @@ To build the desktop app:
 npm run app:build
 ```
 
-Installers land in `src-tauri/target/release/bundle/`. `npm run app:dev` runs it with hot reload.
+Installers land in `src-tauri/target/release/bundle/`. `npm run app:dev` builds the frontend once and launches the app (no hot reload; restart it to pick up changes).
 
 ## What it does
 

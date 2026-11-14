@@ -98,6 +98,28 @@ test('native: whole-window close closes only this window and can be reopened wit
   assert.deepEqual(JSON.parse(h.storage.get('svgv.closed')), [[a.path, b.path]]);
 });
 
+test('native: title-bar close of one of several windows closes only that window, with bookkeeping', async () => {
+  const h = createHarness();
+  const { a, b } = addWatchedTabs(h);
+  h.context.getAllWebviewWindows = async () => [{ label: 'main' }, { label: 'doc-1' }];
+  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  await h.nativeWindow.closeRequestedHandler(event);
+  assert.equal(event.prevented, true);
+  assert.equal(h.nativeWindow.destroyCalls, 1);
+  assert.deepEqual(JSON.parse(h.storage.get('svgv.session')), {});
+  assert.deepEqual(JSON.parse(h.storage.get('svgv.closed')), [[a.path, b.path]]);
+});
+
+test('native: title-bar close of the last window leaves quitting and the session to Rust', async () => {
+  const h = createHarness();
+  const { a, b } = addWatchedTabs(h);
+  h.context.getAllWebviewWindows = async () => [{ label: 'main' }];
+  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  await h.nativeWindow.closeRequestedHandler(event);
+  assert.equal(h.nativeWindow.destroyCalls, 0);
+  assert.deepEqual(JSON.parse(h.storage.get('svgv.session')), { main: [a.path, b.path] });
+});
+
 test('native: closed tabs reopen most recent first with Ctrl+Shift+T', async () => {
   const h = createHarness();
   const { a, b } = addWatchedTabs(h);

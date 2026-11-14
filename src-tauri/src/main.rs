@@ -9,7 +9,7 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Component, Path, PathBuf, Prefix};
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 use tauri::{Emitter, Manager, State};
@@ -17,6 +17,42 @@ use tauri::{Emitter, Manager, State};
 /// The file this process was launched with, if any. Taken exactly once by the
 /// frontend during boot.
 struct InitialFile(Mutex<Option<String>>);
+
+/// Canonical folders of the SVG documents this process has opened. The `asset`
+/// handler only serves images from inside one of these, so an SVG can show the
+/// pictures that sit next to it but cannot pull other files off the disk.
+#[derive(Clone, Default)]
+struct OpenedDirs(Arc<Mutex<Vec<PathBuf>>>);
+
+impl OpenedDirs {
+    fn remember(&self, dir: PathBuf) {
+        if let Ok(mut dirs) = self.0.lock() {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+
+    fn snapshot(&self) -> Vec<PathBuf> {
+        self.0.lock().map(|d| d.clone()).unwrap_or_default()
+    }
+}
+
+fn is_svg_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("svg"))
+}
+
+/// The real path of an SVG document, or an error if `path` (after following
+/// links) is not an `.svg` file. The viewer never needs to read anything else.
+fn svg_document(path: &str) -> Result<PathBuf, String> {
+    let real = std::fs::canonicalize(path).map_err(|e| format!("{path}: {e}"))?;
+    if !is_svg_path(&real) {
+        return Err(format!("{path}: not an SVG file"));
+    }
+    Ok(real)
+}
 
 // One worker owns routing and the unclaimed queue. Window creation must not run
 // in a synchronous IPC command or window-event callback (WebView2 deadlocks).
@@ -401,9 +437,15 @@ fn first_file_arg<I: IntoIterator<Item = String>>(args: I) -> Option<String> {
 // filesystem commands is async and hands the blocking std::fs work to
 // `spawn_blocking` — the same shape `claim_external_open` uses above.
 #[tauri::command]
-async fn read_text_file(path: String) -> Result<String, String> {
+async fn read_text_file(path: String, opened: State<'_, OpenedDirs>) -> Result<String, String> {
+    let opened = opened.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+        let real = svg_document(&path)?;
+        let text = std::fs::read_to_string(&real).map_err(|e| format!("{path}: {e}"))?;
+        if let Some(dir) = real.parent() {
+            opened.remember(dir.to_path_buf());
+        }
+        Ok(text)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -414,7 +456,7 @@ async fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 async fn file_mtime(path: String) -> Result<u64, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        let meta = std::fs::metadata(svg_document(&path)?).map_err(|e| e.to_string())?;
         let modified = meta.modified().map_err(|e| e.to_string())?;
         let ms = modified
             .duration_since(UNIX_EPOCH)
@@ -439,6 +481,9 @@ async fn sibling_files(path: String) -> Result<Vec<String>, String> {
         const EXTS: [&str; 1] = ["svg"];
 
         let file = std::path::Path::new(&path);
+        if !is_svg_path(file) {
+            return Err("not an SVG file".to_string());
+        }
         let dir = file
             .parent()
             .ok_or_else(|| "no parent directory".to_string())?;
@@ -528,9 +573,8 @@ fn is_under(path: &Path, root: &Path) -> bool {
 }
 
 /// The absolute local path `raw` names, with `.` and `..` resolved without
-/// touching the disk, or None if it is relative, a network or device path, or
-/// outside `home`.
-fn local_image_path(raw: &str, home: &Path) -> Option<PathBuf> {
+/// touching the disk, or None if it is relative or a network or device path.
+fn local_image_path(raw: &str) -> Option<PathBuf> {
     let b = raw.as_bytes();
     if b.len() >= 2 && matches!(b[0], b'\\' | b'/') && matches!(b[1], b'\\' | b'/') {
         return None;
@@ -548,15 +592,15 @@ fn local_image_path(raw: &str, home: &Path) -> Option<PathBuf> {
             Component::Normal(s) => out.push(s),
         }
     }
-    (out.is_absolute() && is_under(&out, home)).then_some(out)
+    out.is_absolute().then_some(out)
 }
 
-fn image_mime(path: &Path) -> &'static str {
+fn image_mime(path: &Path) -> Option<&'static str> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
-    match ext.as_deref() {
+    Some(match ext.as_deref() {
         Some("png") => "image/png",
         Some("jpg" | "jpeg" | "jfif") => "image/jpeg",
         Some("gif") => "image/gif",
@@ -565,11 +609,13 @@ fn image_mime(path: &Path) -> &'static str {
         Some("svg") => "image/svg+xml",
         Some("bmp") => "image/bmp",
         Some("ico") => "image/x-icon",
-        _ => "application/octet-stream",
-    }
+        _ => return None,
+    })
 }
 
-fn asset_response(uri_path: &str, home: Option<PathBuf>) -> tauri::http::Response<Vec<u8>> {
+/// Serves an image for `<image href>` in a rendered SVG. Only image files
+/// inside the folder of a document the app has opened are returned.
+fn asset_response(uri_path: &str, roots: &[PathBuf]) -> tauri::http::Response<Vec<u8>> {
     let status = |code: u16| {
         tauri::http::Response::builder()
             .status(code)
@@ -579,20 +625,26 @@ fn asset_response(uri_path: &str, home: Option<PathBuf>) -> tauri::http::Respons
     let raw = percent_encoding::percent_decode_str(uri_path.trim_start_matches('/'))
         .decode_utf8_lossy()
         .into_owned();
-    let Some(home) = home else { return status(403) };
-    let Some(path) = local_image_path(&raw, &home) else {
+    let Some(path) = local_image_path(&raw) else {
         return status(403);
     };
-    let (Ok(real), Ok(real_home)) = (std::fs::canonicalize(&path), std::fs::canonicalize(&home))
-    else {
+    let Ok(real) = std::fs::canonicalize(&path) else {
         return status(404);
     };
-    if !is_under(&real, &real_home) {
+    if !roots.iter().any(|root| is_under(&real, root)) {
         return status(403);
     }
+    let Some(mime) = image_mime(&real) else {
+        return status(403);
+    };
     match std::fs::read(&real) {
         Ok(bytes) => tauri::http::Response::builder()
-            .header("Content-Type", image_mime(&real))
+            .header("Content-Type", mime)
+            .header("X-Content-Type-Options", "nosniff")
+            .header(
+                "Content-Security-Policy",
+                "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+            )
             .body(bytes)
             .expect("image response is valid"),
         Err(_) => status(404),
@@ -602,14 +654,6 @@ fn asset_response(uri_path: &str, home: Option<PathBuf>) -> tauri::http::Respons
 #[cfg(test)]
 mod asset_tests {
     use super::*;
-
-    fn home() -> PathBuf {
-        if cfg!(windows) {
-            PathBuf::from(r"C:\Users\Tim")
-        } else {
-            PathBuf::from("/home/tim")
-        }
-    }
 
     #[test]
     fn network_and_device_paths_are_refused_before_any_disk_access() {
@@ -621,29 +665,67 @@ mod asset_tests {
             r"\\.\C:\Users\Tim\x.svg",
             r"\\?\UNC\evil\share\x.svg",
         ] {
-            assert_eq!(local_image_path(raw, &home()), None, "{raw}");
+            assert_eq!(local_image_path(raw), None, "{raw}");
         }
     }
 
     #[test]
-    fn only_absolute_paths_under_home_are_allowed() {
-        assert_eq!(local_image_path("x.svg", &home()), None);
+    fn only_absolute_paths_are_allowed_and_dots_resolve_lexically() {
+        assert_eq!(local_image_path("x.svg"), None);
         if cfg!(windows) {
             assert_eq!(
-                local_image_path(r"c:\users\tim\docs\..\pics\x.svg", &home()),
+                local_image_path(r"c:\users\tim\docs\..\pics\x.svg"),
                 Some(PathBuf::from(r"c:\users\tim\pics\x.svg"))
             );
-            assert_eq!(local_image_path(r"C:\Users\Tim\..\Other\x.svg", &home()), None);
-            assert_eq!(local_image_path(r"C:\Users\Timothy\x.svg", &home()), None);
-            assert_eq!(local_image_path(r"D:\Users\Tim\x.svg", &home()), None);
         } else {
             assert_eq!(
-                local_image_path("/home/tim/docs/../pics/x.svg", &home()),
+                local_image_path("/home/tim/docs/../pics/x.svg"),
                 Some(PathBuf::from("/home/tim/pics/x.svg"))
             );
-            assert_eq!(local_image_path("/home/tim/../other/x.svg", &home()), None);
-            assert_eq!(local_image_path("/home/timothy/x.svg", &home()), None);
         }
+    }
+
+    fn uri(path: &Path) -> String {
+        percent_encoding::utf8_percent_encode(
+            &path.to_string_lossy(),
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn asset_serves_only_images_inside_an_opened_document_folder() {
+        let base = std::env::temp_dir().join(format!("svgv-asset-test-{}", std::process::id()));
+        let docs = base.join("docs");
+        std::fs::create_dir_all(docs.join("img")).unwrap();
+        std::fs::write(docs.join("img").join("pic.png"), b"png").unwrap();
+        std::fs::write(docs.join("notes.txt"), b"secret").unwrap();
+        std::fs::write(base.join("outside.png"), b"png").unwrap();
+        let roots = vec![std::fs::canonicalize(&docs).unwrap()];
+
+        let ok = asset_response(&uri(&docs.join("img").join("pic.png")), &roots);
+        assert_eq!(ok.status(), 200);
+        assert_eq!(ok.body(), b"png");
+        assert_eq!(ok.headers()["x-content-type-options"], "nosniff");
+
+        let dotdot = docs.join("img").join("..").join("..").join("outside.png");
+        assert_eq!(asset_response(&uri(&dotdot), &roots).status(), 403);
+        assert_eq!(asset_response(&uri(&base.join("outside.png")), &roots).status(), 403);
+        assert_eq!(asset_response(&uri(&docs.join("notes.txt")), &roots).status(), 403);
+        assert_eq!(asset_response(&uri(&docs.join("img").join("pic.png")), &[]).status(), 403);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn only_svg_documents_can_be_read() {
+        let base = std::env::temp_dir().join(format!("svgv-doc-test-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("a.SVG"), b"<svg/>").unwrap();
+        std::fs::write(base.join("b.txt"), b"secret").unwrap();
+        assert!(svg_document(&base.join("a.SVG").to_string_lossy()).is_ok());
+        assert!(svg_document(&base.join("b.txt").to_string_lossy()).is_err());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 
@@ -669,16 +751,23 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_process::init())
         .register_asynchronous_uri_scheme_protocol("asset", |ctx, request, responder| {
-            let home = ctx.app_handle().path().home_dir().ok();
+            let roots = ctx.app_handle().state::<OpenedDirs>().snapshot();
             let uri_path = request.uri().path().to_owned();
             tauri::async_runtime::spawn_blocking(move || {
-                responder.respond(asset_response(&uri_path, home));
+                responder.respond(asset_response(&uri_path, &roots));
             });
         })
         .on_window_event(|window, event| {
+            // Title bar / Alt+F4. Closing the last window quits the whole
+            // program (its session is kept for the next launch). Any other
+            // window closes on its own: the frontend's onCloseRequested
+            // handler runs the same bookkeeping as Ctrl+Shift+W and destroys
+            // only that window.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                window.app_handle().exit(0);
+                if window.app_handle().webview_windows().len() <= 1 {
+                    api.prevent_close();
+                    window.app_handle().exit(0);
+                }
                 return;
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -718,6 +807,7 @@ fn main() {
             Ok(())
         })
         .manage(InitialFile(Mutex::new(initial)))
+        .manage(OpenedDirs::default())
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             file_mtime,

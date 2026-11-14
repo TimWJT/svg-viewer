@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHarness, addWatchedTabs, settle, loadCreateDOMPurify } from './helpers/source-harness.mjs';
-import { createDomWindow } from './helpers/mini-dom.mjs';
+import { JSDOM } from 'jsdom';
 
 const createDOMPurify = await loadCreateDOMPurify();
-const DOMPurify = createDOMPurify(createDomWindow());
+// Real DOM for the sanitiser; the app shell around it is still the test double.
+const DOMPurify = createDOMPurify(new JSDOM('').window);
 
 function realHarness(options = {}) {
   const h = createHarness({ dompurify: DOMPurify, ...options });
@@ -51,6 +52,12 @@ test('render: XML preamble and DOCTYPE are stripped before rendering', () => {
   assert.equal(svg.getAttribute('width'), '100');
   assert.equal(svg.getAttribute('height'), '80');
   assert.deepEqual(titles(h), ['svg', 'rect#box']);
+});
+
+test('render: a DOCTYPE with an internal subset is stripped whole', () => {
+  const h = realHarness();
+  const out = h.call('stripXmlPreamble', '<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x.dtd" [\n<!ENTITY ns_svg "http://www.w3.org/2000/svg">\n]>\n<svg/>');
+  assert.equal(out, '<svg/>');
 });
 
 test('render: XML source block gets a copy button and preserves raw source', () => {
@@ -129,4 +136,22 @@ test('find: scrolling down to a match keeps #chrome visible', () => {
   scroller.dispatch('scroll', {});
   assert.equal(h.element('#chrome').classList.contains('hidden'), false,
     'toolbar must stay visible while the Find bar is open below it');
+});
+
+test('render: local images resolve only inside the document folder', () => {
+  const h = realHarness();
+  h.run("state.docDir = 'C:/docs/art'");
+  h.call('render', [
+    '<svg viewBox="0 0 10 10">',
+    '<image id="inside" href="img/a.png" width="1" height="1"/>',
+    '<image id="up" href="../secret.png" width="1" height="1"/>',
+    '<image id="sneaky" href="img/../../secret.png" width="1" height="1"/>',
+    '<image id="abs-out" href="C:/Users/x.png" width="1" height="1"/>',
+    '</svg>',
+  ].join(''));
+  const href = id => doc(h).querySelector('#' + id).getAttribute('href');
+  assert.equal(href('inside'), 'mock-asset:C:/docs/art/img/a.png');
+  assert.equal(href('up'), null);
+  assert.equal(href('sneaky'), null);
+  assert.equal(href('abs-out'), null);
 });

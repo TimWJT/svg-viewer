@@ -1,17 +1,13 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { DomElement, DomNode, NODE_TYPE } from './mini-dom.mjs';
+import { sanitizeSvg } from '../../src/sanitize.js';
 
 const sourcePath = new URL('../../src/main.js', import.meta.url);
 
 export async function loadCreateDOMPurify() {
-  try {
-    const mod = await import('dompurify');
-    return mod.default || mod;
-  } catch {
-    const mod = await import('../../../markdown-viewer/node_modules/dompurify/dist/purify.es.mjs');
-    return mod.default || mod;
-  }
+  const mod = await import('dompurify');
+  return mod.default || mod;
 }
 
 export function deferred() {
@@ -95,6 +91,7 @@ export function createHarness({ native = true, saved = {}, rawSaved = {}, label 
     async destroy() { this.destroyCalls++; },
     async setFocus() { this.focusCalls++; },
     async setTitle() {},
+    async onCloseRequested(handler) { this.closeRequestedHandler = handler; return () => {}; },
   };
   const context = vm.createContext({
     console, document, window, localStorage, location: { search }, URLSearchParams, TextEncoder,
@@ -112,6 +109,8 @@ export function createHarness({ native = true, saved = {}, rawSaved = {}, label 
     requestAnimationFrame: fn => { const id = ++frameSeq; frames.set(id, fn); return id; },
     cancelAnimationFrame: id => frames.delete(id),
     DOMPurify: dompurify || { sanitize: html => html },
+    sanitizeSvg: dompurify ? sanitizeSvg : (_purify, html) => html,
+    getAllWebviewWindows: async () => [],
     hljs: { highlightElement() {}, registerLanguage() {} },
     xmlLang: {},
     cssLang: {},
